@@ -1,0 +1,75 @@
+from transformers import *
+from .helper import id_generator
+
+
+# PROXY CALL TRANSFORMER
+class Proxy(NodeTransformer):
+    def __init__(self):
+        ast.NodeTransformer.__init__(self)
+        self.injected_dict = False
+        
+        self.call_dict_name = id_generator(random.randint(6, 18))
+        self.call_dict_node = None
+        self.call_dict = {}
+        self.call_dict_data = []
+        
+        self.module_node = None
+        self.skip_calls = 0
+
+        
+    def visit_Module(self, node):
+        
+        # Inject dict containing blank calls into module if not done
+        if not self.injected_dict:
+            tmp = node
+            self.module_node = tmp
+            self.call_dict_node = Assign(targets=[Name(id=self.call_dict_name, ctx=Store())], value=Dict(keys=[], values=[]))
+
+            node.body.insert(0, self.call_dict_node)
+            self.injected_dict = True
+
+        
+        self.generic_visit(node)
+
+        # Since this is executed after the module is completed, we can safely add the calls to the module from what we have collected.
+        # Add call data to module body
+        index_of = self.module_node.body.index(self.call_dict_node)
+        random.shuffle(self.call_dict_data)
+
+        # This needs to be added after all classes, function defs, assignments
+
+        i = 0
+        n = self.module_node.body[i]
+
+        #for call in self.call_dict_data:
+        #    self.module_node.body.insert(index_of + 1, call)
+
+        return node
+
+    def visit_Call(self, node):
+        
+        if isinstance(node.func, Attribute) or isinstance(node.func, Subscript):
+            # Could rely on other variables
+            # Perhaps eval instead?
+            #self.generic_visit(node)
+            return node
+
+        # Need to analyse where the function is defined
+        print(node.func.id)
+        
+        # Add call to dict
+        key = id_generator(random.randint(16, 32))
+        while key in self.call_dict.keys():
+            key = id_generator(random.randint(16, 32))
+
+        self.call_dict[key] = node.func
+        
+        # Write to dictionary
+        self.call_dict_data.append(Assign(targets=[Subscript(value=Name(id=self.call_dict_name, ctx=Load()), slice=Index(value=Str(s=key)), ctx=Store())], value=node.func))
+        self.module_node.body.insert(1, self.call_dict_data[-1])
+        
+        
+        # Return new call
+        node.func = Subscript(value=Name(id=self.call_dict_name, ctx=Load()), slice=Index(value=Str(s=key)), ctx=Load())
+        return node
+    
